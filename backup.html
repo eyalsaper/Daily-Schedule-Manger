@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>גיבוי ושחזור — הסדר היומי</title>
+<style>
+  :root { --bg:#1a1e19; --card:#242a22; --card2:#2c3329; --bd:#414a3c; --tx:#f0ede3; --mu:#9aa38f; --ac:#7a9b65; --ac2:#9cbd7f; --am:#e0a24d; --rd:#e0574d; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:20px; background:var(--bg); color:var(--tx); font-family:'Assistant',system-ui,sans-serif; line-height:1.6; }
+  .wrap { max-width:760px; margin:0 auto; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:var(--mu); font-size:14px; margin:0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--bd); border-radius:14px; padding:18px; margin-bottom:16px; }
+  .card h2 { font-size:16px; margin:0 0 10px; display:flex; align-items:center; gap:8px; }
+  .btn { display:inline-flex; align-items:center; justify-content:center; gap:7px; padding:13px 20px; border-radius:10px; border:none; cursor:pointer; font-family:inherit; font-size:15px; font-weight:700; }
+  .btn-main { background:linear-gradient(135deg,var(--ac),var(--ac2)); color:#fff; width:100%; }
+  .btn-warn { background:none; border:1px solid var(--am); color:var(--am); width:100%; }
+  .btn:active { transform:translateY(1px); }
+  table { width:100%; border-collapse:collapse; margin-top:10px; font-size:14px; }
+  th,td { text-align:right; padding:7px 8px; border-bottom:1px solid var(--bd); }
+  th { color:var(--mu); font-weight:600; font-size:12.5px; }
+  .num { font-weight:800; color:var(--ac2); }
+  .msg { margin-top:12px; padding:11px 13px; border-radius:9px; font-size:13.5px; display:none; }
+  .msg.ok { display:block; background:rgba(122,155,101,.16); border:1px solid var(--ac); }
+  .msg.err { display:block; background:rgba(224,87,77,.16); border:1px solid var(--rd); }
+  .note { font-size:12.5px; color:var(--mu); margin-top:8px; }
+  .warnbox { background:rgba(224,162,77,.12); border:1px solid var(--am); border-radius:10px; padding:12px; font-size:13.5px; margin-bottom:12px; }
+  pre { background:var(--card2); border:1px solid var(--bd); border-radius:9px; padding:11px; overflow:auto; font-size:11.5px; max-height:200px; direction:ltr; text-align:left; }
+  input[type=file] { display:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🛟 גיבוי ושחזור — הסדר היומי</h1>
+  <p class="sub">כלי עצמאי. קורא את הנתונים ישירות מהדפדפן, בלי לעבור דרך קוד האפליקציה.</p>
+
+  <div class="card">
+    <h2>1. מה קיים כרגע במכשיר הזה</h2>
+    <div id="summary">טוען…</div>
+    <p class="note">אם המספרים כאן נראים נכון — הנתונים שלך קיימים ובטוחים במכשיר הזה.</p>
+  </div>
+
+  <div class="card">
+    <h2>2. הורדת גיבוי מלא</h2>
+    <p class="note" style="margin-top:0">מוריד <b>הכל</b> — כל מפתח שקיים בדפדפן, בלי סינון ובלי רשימה קבועה. גם דברים שהאפליקציה עצמה אולי מפספסת.</p>
+    <button class="btn btn-main" onclick="doExport()">⬇ הורד גיבוי מלא</button>
+    <div id="expMsg" class="msg"></div>
+  </div>
+
+  <div class="card">
+    <h2>3. שחזור מקובץ</h2>
+    <div class="warnbox">⚠️ שחזור <b>מחליף</b> את הנתונים הנוכחיים במה שבקובץ. אין מיזוג ואין כפילויות.</div>
+    <button class="btn btn-warn" onclick="document.getElementById('f').click()">⬆ בחר קובץ גיבוי לשחזור</button>
+    <input type="file" id="f" accept=".json,application/json" onchange="doImport(this)" />
+    <div id="impMsg" class="msg"></div>
+  </div>
+
+  <div class="card">
+    <h2>4. תצוגת מפתחות (לאבחון)</h2>
+    <button class="btn btn-warn" onclick="toggleKeys()">הצג / הסתר את רשימת המפתחות</button>
+    <pre id="keys" style="display:none"></pre>
+  </div>
+</div>
+
+<script>
+// ---- קריאת כל localStorage, בלי הנחות על שמות מפתחות ----
+function readAll() {
+  var out = {};
+  for (var i = 0; i < localStorage.length; i++) {
+    var k = localStorage.key(i);
+    if (!k) continue;
+    if (k.indexOf('__ts__') === 0) continue; // חותמות זמן פנימיות — לא נחוצות לגיבוי
+    out[k] = localStorage.getItem(k);
+  }
+  return out;
+}
+
+function parseMaybe(s) { try { return JSON.parse(s); } catch (e) { return null; } }
+
+function summarize() {
+  var all = readAll();
+  var profs = parseMaybe(all['profiles']) || [];
+  var rows = [];
+  var LABELS = {
+    tasks: 'משימות ופגישות', adhoc: 'מתפרצות', notes: 'פתקים וטבלאות',
+    initiatives: 'משימות יוזמה', checklists: "צ'קליסטים", schedules: 'לוזים', log: 'רשומות ביצוע'
+  };
+  if (!profs.length) {
+    document.getElementById('summary').innerHTML =
+      '<div class="msg err" style="display:block">לא נמצאו פרופילים במכשיר הזה. אם זה מכשיר חדש — זה תקין. אם לא, אל תבצע שחזור מכאן; קודם בדוק במכשיר שבו הנתונים כן מופיעים.</div>';
+    return;
+  }
+  var html = '<table><tr><th>משתמש</th>';
+  var kinds = ['tasks','adhoc','notes','initiatives','checklists'];
+  kinds.forEach(function (k) { html += '<th>' + LABELS[k] + '</th>'; });
+  html += '</tr>';
+  profs.forEach(function (p) {
+    html += '<tr><td>' + (p.icon || '') + ' ' + (p.name || p.id) + '</td>';
+    kinds.forEach(function (k) {
+      var v = parseMaybe(all[k + '::' + p.id]);
+      var n = Array.isArray(v) ? v.length : (v && typeof v === 'object' ? Object.keys(v).length : 0);
+      html += '<td class="num">' + n + '</td>';
+    });
+    html += '</tr>';
+  });
+  html += '</table>';
+  html += '<p class="note">סה״כ ' + Object.keys(all).length + ' מפתחות בדפדפן.</p>';
+  document.getElementById('summary').innerHTML = html;
+}
+
+function doExport() {
+  var m = document.getElementById('expMsg');
+  try {
+    var all = readAll();
+    // שומרים גם בפורמט תואם-אפליקציה (data עם ערכים מפורסרים) וגם raw, ליתר ביטחון
+    var data = {};
+    Object.keys(all).forEach(function (k) {
+      var v = parseMaybe(all[k]);
+      data[k] = (v === null && all[k] !== 'null') ? all[k] : v;
+    });
+    var dump = {
+      _app: 'hasseder-hayomi', _version: 2, _tool: 'standalone-backup',
+      _date: new Date().toISOString(), data: data, raw: all
+    };
+    var blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'hasseder-FULL-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    m.className = 'msg ok';
+    m.innerHTML = '✓ הגיבוי ירד — ' + Object.keys(all).length + ' מפתחות. שמור את הקובץ במקום בטוח (למשל שלח לעצמך במייל).';
+  } catch (e) {
+    m.className = 'msg err';
+    m.textContent = 'שגיאה: ' + e.message;
+  }
+}
+
+function doImport(input) {
+  var m = document.getElementById('impMsg');
+  var file = input.files && input.files[0];
+  if (!file) return;
+  if (!confirm('השחזור יחליף את הנתונים הנוכחיים במכשיר הזה. להמשיך?')) { input.value = ''; return; }
+  var r = new FileReader();
+  r.onload = function () {
+    try {
+      var dump = JSON.parse(r.result);
+      var src = dump.raw || dump.data;
+      if (!src) throw new Error('קובץ לא תקין — אין בו נתונים');
+      var n = 0;
+      Object.keys(src).forEach(function (k) {
+        var v = src[k];
+        localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v));
+        n++;
+      });
+      m.className = 'msg ok';
+      m.innerHTML = '✓ שוחזרו ' + n + ' מפתחות. פתח מחדש את האפליקציה כדי לראות את הנתונים.';
+      summarize();
+    } catch (e) {
+      m.className = 'msg err';
+      m.textContent = 'שגיאה בשחזור: ' + e.message;
+    }
+    input.value = '';
+  };
+  r.readAsText(file);
+}
+
+function toggleKeys() {
+  var el = document.getElementById('keys');
+  if (el.style.display === 'none') {
+    var all = readAll();
+    el.textContent = Object.keys(all).sort().map(function (k) {
+      return k + '  (' + (all[k] || '').length + ' chars)';
+    }).join('\n');
+    el.style.display = 'block';
+  } else { el.style.display = 'none'; }
+}
+
+summarize();
+</script>
+</body>
+</html>
